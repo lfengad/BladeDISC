@@ -20,6 +20,7 @@ export CUDACXX=${CUDACXX:-"${CUDA_HOME}/bin/nvcc"}
 export PATH=${CUDA_HOME}/bin/:$PATH
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 export LIBRARY_PATH=${CUDA_HOME}/lib64:$LIBRARY_PATH
+export GCC_HOST_COMPILER_PATH=$(which gcc) # needed by bazel crosstool
 
 # Build TorchBlade with DEBUG
 # export DEBUG=1
@@ -36,6 +37,8 @@ function ci_build() {
     requirements=requirements-dev-${TORCH_BLADE_CI_BUILD_TORCH_VERSION}.txt
     python3 -m pip install --upgrade pip
     python3 -m pip install cmake ninja virtualenv -r ${requirements}
+
+    python3 ../scripts/python/common_setup.py
     rm -rf build && python3 setup.py develop;
     # The following are UNIT TESTS
     export TORCH_BLADE_DEBUG_LOG=ON

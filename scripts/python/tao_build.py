@@ -41,6 +41,9 @@ from common_setup import (
     get_source_root_dir,
     logger,
     which,
+    running_on_ci,
+    ci_build_flag,
+    remote_cache_token,
 )
 
 from tao_common import (
@@ -52,9 +55,6 @@ from tao_common import (
     default_env,
     gcc_env,
     overwrite_file,
-    running_on_ci,
-    ci_build_flag,
-    remote_cache_token,
 )
 
 PYTHON_BIN_NAME = os.getenv("PYTHON", "python")

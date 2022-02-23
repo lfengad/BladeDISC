@@ -38,8 +38,7 @@ function ci_build() {
     python3 -m pip install --upgrade pip
     python3 -m pip install cmake ninja virtualenv -r ${requirements}
 
-    python3 ../scripts/python/common_setup.py
-    rm -rf build && python3 setup.py develop;
+    rm -rf build && python3 setup.py build_deps && python3 setup.py develop;
     # The following are UNIT TESTS
     export TORCH_BLADE_DEBUG_LOG=ON
     python3 setup.py cpp_test 2>&1 | tee -a build/cpp_test.out;

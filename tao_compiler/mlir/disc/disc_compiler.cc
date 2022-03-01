@@ -310,15 +310,15 @@ LogicalResult LowerHLOToLLVM(ModuleOp m, const DISCLoweringOptions& options) {
   }
   pm.addNestedPass<FuncOp>(disc_ral::createDiscFusionPass(
       gpu_enabled, enable_stitch ? "stitch" : "base"));
-  if (gpu_enabled) {
-    auto& gpu_options = options.gpu_info;
-    pm.addNestedPass<FuncOp>(
-        disc_ral::createDiscSpecializeFusionWithSpeculationPass(
-            gpu_options.cc_major, gpu_options.cc_minor));
-  } else {
-    pm.addNestedPass<FuncOp>(
-        disc_ral::createDiscSpecializeFusionWithSpeculationPass());
-  }
+  // if (gpu_enabled) {
+  //   auto& gpu_options = options.gpu_info;
+  //   pm.addNestedPass<FuncOp>(
+  //       disc_ral::createDiscSpecializeFusionWithSpeculationPass(
+  //           gpu_options.cc_major, gpu_options.cc_minor));
+  // } else {
+  //   pm.addNestedPass<FuncOp>(
+  //       disc_ral::createDiscSpecializeFusionWithSpeculationPass());
+  // }
 
   pm.addNestedPass<FuncOp>(createCanonicalizerPass());
   pm.addNestedPass<FuncOp>(createCSEPass());

@@ -28,6 +28,7 @@
 #include "tensorflow/compiler/mlir/xla/ral/ral_driver.h"
 #include "tensorflow/compiler/mlir/xla/ral/ral_helper.h"
 #include "tensorflow/stream_executor/device_description.h"
+#include "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_collector.h"
 
 namespace se = stream_executor;
 
@@ -111,6 +112,7 @@ struct RalTFContextState : public ::tao::ral::Context::Resource {
 
 RalTfContext::RalTfContext(const RalTfContextOptions& options) {
   // TODO: add a macro to control if we should enbale gpu.
+  tao::ral::tvm_impl::CollectorCheckEnable();
   addDriver(::tao::ral::gpu::GPUDriver::name(),
             absl::make_unique<::tao::ral::gpu::GPUDriver>(this));
   addDriver(::tao::ral::cpu::CPUDriver::name(),
@@ -138,14 +140,19 @@ RalTfContext::RalTfContext(const RalTfContextOptions& options) {
   }
 }
 
-RalTfContext::~RalTfContext() {}
+RalTfContext::~RalTfContext() {
+  tao::ral::tvm_impl::CollectorDumpResults();
+}
 
 RalTfExecutionContext::RalTfExecutionContext(RalTfContext* ctx)
     : ExecutionContext(ctx), impl_(new Impl) {
+  tao::ral::tvm_impl::CollectorCheckEnable();   
   onExecutionStart();
 }
 
-RalTfExecutionContext::~RalTfExecutionContext() { onExecutionFinish(); }
+RalTfExecutionContext::~RalTfExecutionContext() { onExecutionFinish(); 
+ tao::ral::tvm_impl::CollectorDumpResults();
+}
 
 void RalTfExecutionContext::setOpContext(OpKernelContext* ctx) {
   impl_->op_ctx = ctx;
@@ -439,12 +446,15 @@ void ral_tf_gpu_launch(ExecutionContext* ctx, void** blobs, size_t num_blobs,
 
     auto key = std::make_pair(blob, std::string(kernel_name));
     auto it = state->kernels.find(key);
+    VLOG(0) << "Kernel " << key.second << " " << num_args;
     if (it == state->kernels.end()) {
       se::MultiKernelLoaderSpec spec(num_args);
       spec.AddCudaCubinInMemory((char*)blob, (char*)kernel_name);
       std::unique_ptr<se::KernelBase> kernel(new se::KernelBase(executor));
-      auto status = ral_to_bool(executor->GetKernel(spec, kernel.get()));
+      Status res = executor->GetKernel(spec, kernel.get());
+      auto status = ral_to_bool(res); //executor->GetKernel(spec, kernel.get()));
       if (!status) {
+        VLOG(0) <<  res.error_message();
         VLOG(0) << "unable to load kernel";
         ctx->signalError(Context::FAILURE, "fail to find kernel " + key.second);
         return;

@@ -203,6 +203,12 @@ def configure_compiler(root, args):
                 execute("rm -rf {0} && ln -s {1} {0}".format(link_in_tf, src_file))
         logger.info("linking ./tao to tf_community/tao")
         execute("rm -rf {0} && ln -s {1} {0}".format(os.path.join('tf_community', 'tao'), os.path.join(root, 'tao')))
+        if args.dcu:
+            src = args.rocm_headers
+            print("ln -s {1} {0}".format(os.path.join(tao_ral_dir(root), 'rocm'),
+                  src))
+            execute("rm -rf {0} && ln -s {1} {0}".format(os.path.join(tao_ral_dir(root), 'rocm', "include"),
+                     src))
 
     # configure tensorflow
     with cwd(tf_root_dir()), gcc_env(args.compiler_gcc):
@@ -390,6 +396,9 @@ def build_tao_compiler(root, args):
         else:
             flag = "--config=cuda"
 
+        if args.dcu_liquid:
+            flag += ' --cxxopt="-DTENSORFLOW_USE_DCU_WITH_LLVM_ROCM_BACKEND=1"'
+
         if args.build_dbg_symbol:
             flag += " --copt=-g"
 
@@ -400,8 +409,9 @@ def build_tao_compiler(root, args):
             flag += ' --cxxopt="-DTAO_ENABLE_MKLDNN" --define is_mkldnn=true'
 
         bazel_build(TARGET_TAO_COMPILER_MAIN, flag=flag)
-        bazel_build(TARGET_DISC_OPT, flag=flag)
-        bazel_build(TARGET_DISC_REPLAY, flag=flag)
+        if not args.dcu:
+            bazel_build(TARGET_DISC_OPT, flag=flag)
+            bazel_build(TARGET_DISC_REPLAY, flag=flag)
         execute(
             "cp -f -p {}/tao/third_party/ptxas/10.2/ptxas ./bazel-bin/tensorflow/compiler/decoupling/".format(
                 root
@@ -418,6 +428,8 @@ def build_mlir_ral(root, args):
             BAZEL_BUILD_CMD = BAZEL_BUILD_CMD + " --config=dcu"
         else:
             BAZEL_BUILD_CMD = BAZEL_BUILD_CMD + " --config=cuda"
+        if args.dcu_liquid:
+            BAZEL_BUILD_CMD += ' --cxxopt="-DTENSORFLOW_USE_DCU_WITH_LLVM_ROCM_BACKEND=1"'
     else:
         BAZEL_BUILD_CMD = BAZEL_BUILD_CMD + " --config=release_cpu_linux"
 
@@ -525,6 +537,8 @@ def test_tao_compiler(root, args):
                 flag = "--config=dcu"
             else:
                 flag = "--config=cuda"
+            if args.dcu_liquid:
+                flag += ' --cxxopt="-DTENSORFLOW_USE_DCU_WITH_LLVM_ROCM_BACKEND=1"'
             mlir_tests_list = [
                 TARGET_DISC_TRANSFORMS_TEST,
                 TARGET_DISC_E2E_TEST,
@@ -730,6 +744,14 @@ def parse_args():
         action="store_true",
         help="Skip build stages when running test stages. By default, "
         "build stages\nwill be triggered before test stages run.",
+    )
+    parser.add_argument(
+        "--dcu_liquid", action="store_true", help="enable liquid heat dissipation dcu mode"
+    )
+    parser.add_argument(
+        "--rocm_headers", type=str, 
+        help="path of header files of dcu rocm.", 
+        default="/opt/dtk-21.04/include"
     )
     parser.add_argument(
         "-s",

@@ -23,6 +23,9 @@
 #include "tensorflow/compiler/mlir/xla/ral/ral_logging.h"
 #include "tensorflow/core/public/version.h"
 #include "tensorflow/core/util/env_var.h"
+#include "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_cache.h"
+#include "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_collector.h"
+#include "tensorflow/stream_executor/gpu/gpu_helpers.h"
 
 #ifdef TAO_RAL_USE_STREAM_EXECUTOR
 
@@ -35,6 +38,22 @@ namespace se = ::stream_executor;
 namespace se_impl {
 
 using namespace tensorflow;
+
+namespace {
+  static tensorflow::int64 rocm_profile() {
+  static bool checked = false;
+  static tensorflow::int64 profile = 0;
+  if (checked)  {
+    return profile;
+  }
+  tensorflow::ReadInt64FromEnvVar("DISC_OPS_PROFILING", 0,
+                                 &profile);
+  checked = true;
+  return profile;
+}
+
+}
+
 
 ////////////////////////////////////////////////////////////////////////
 ///////////////           GpuGemmImpl Begin
@@ -187,6 +206,7 @@ static bool DoGemmWithAlgorithm(
      * Since cublas describes matrix in col major,
      * Thus we perform B' x A' = C'
      */
+    // VLOG(0) << "Do gemm with algorithm 0";
     return stream
         ->ThenBlasGemmWithAlgorithm(
             rhs_transpose, lhs_transpose, n, m,
@@ -205,6 +225,7 @@ static bool DoGemmWithAlgorithm(
     int64_t lhs_stride = lhs_matrix.num_rows * lhs_matrix.num_cols;
     int64_t rhs_stride = rhs_matrix.num_rows * rhs_matrix.num_cols;
     int64_t output_stride = output_matrix.num_rows * output_matrix.num_cols;
+     // VLOG(0) << "Do gemm with algorithm 1";
     return stream
         ->ThenBlasGemmStridedBatched(
             rhs_transpose, lhs_transpose, n, m, /*size of reduce dim=*/k,
@@ -216,6 +237,15 @@ static bool DoGemmWithAlgorithm(
         .ok();
   }
 
+  // VLOG(0) << "Do gemm with no algo";
+    // std::chrono::system_clock::time_point t0, t1;
+    // se::port::Status block_status;
+
+    // if (rocm_profile() == 1) {
+    //   block_status = stream->BlockHostUntilDone();
+    //   t0 = std::chrono::system_clock::now();
+    // }
+
   return stream
       ->ThenBlasGemm(rhs_transpose, lhs_transpose, n, m,
                      /*size of reduce dim=*/k,
@@ -225,6 +255,18 @@ static bool DoGemmWithAlgorithm(
                      /*beta=*/static_cast<AlphaBeta>(beta), &output_data,
                      /*leading dim of output=*/n)
       .ok();
+
+    // if (rocm_profile() == 1) {
+    //   block_status = stream->BlockHostUntilDone();
+    //   t1 = std::chrono::system_clock::now();
+    //   auto time = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+    //   VLOG(0) << "TimeDur for rocblas " << " " << m <<  
+    //       " " << n << " " << k << " "
+    //         << time << "us";
+    // }
+
+
+  // return s;
 }
 
 // gemm_algorithm_pick also implemented correctness check, which
@@ -262,6 +304,93 @@ se::blas::AlgorithmType tuningGemm(se::Stream* stream,
   return best_algo;
 }
 
+template <typename InT, typename OutT, typename AlphaBeta>
+static bool DoGemmWithTVM(
+    int64_t batch_size, MatrixDescriptor lhs_matrix,
+    MatrixDescriptor rhs_matrix, MatrixDescriptor output_matrix,
+    se::Stream* stream) {
+  // std::chrono::system_clock::time_point t0, t1, t2, t3, t4, t5; 
+  // if (rocm_profile() == 1) {
+  //     t0 = std::chrono::system_clock::now();
+  // }    
+
+  DCHECK(!output_matrix.transpose);
+  se::DeviceMemory<InT> lhs_data(lhs_matrix.data);
+  se::DeviceMemory<InT> rhs_data(rhs_matrix.data);
+  se::DeviceMemory<OutT> output_data(output_matrix.data);
+  // VLOG(0) << "Using TVM for Gemm.";
+  tvm_impl::TVMFuncCache* tvm_impl_cache_ = tvm_impl::TVMFuncCacheCreateOrGet("gemm", TVM_GPU_DEVICE);
+  
+  // VLOG(0) << "Finish get cache.";
+  auto lhs_transpose = lhs_matrix.transpose ? tvm_impl::TVMGemmTranspose::Transpose
+                                            : tvm_impl::TVMGemmTranspose::NoTranspose;
+  auto rhs_transpose = rhs_matrix.transpose ? tvm_impl::TVMGemmTranspose::Transpose
+                                            : tvm_impl::TVMGemmTranspose::NoTranspose;    
+  auto m = lhs_matrix.transpose ? lhs_matrix.num_cols : lhs_matrix.num_rows;
+  auto k = lhs_matrix.transpose ? lhs_matrix.num_rows : lhs_matrix.num_cols;
+  auto n = rhs_matrix.transpose ? rhs_matrix.num_rows : rhs_matrix.num_cols;
+
+  // VLOG(0) << "lhs: " << lhs_matrix.num_rows << " x " << lhs_matrix.num_cols;
+  // VLOG(0) << "rhs: " << rhs_matrix.num_rows << " x " << rhs_matrix.num_cols;
+  // VLOG(0) << "outs: " << output_matrix.num_rows << " x " << output_matrix.num_cols;
+
+  // VLOG(0) << "Start get key.";
+  // if(rocm_profile() == 1) {
+  //   t1 = std::chrono::system_clock::now();
+  // }
+  // if (k == n) {
+  //   VLOG(0) << m << " " << n << " " << k << " " << lhs_matrix.transpose << " " << rhs_matrix.transpose;
+  // }
+
+  auto key = tvm_impl::GetGemmTVMFuncKey<InT, OutT, AlphaBeta>(TVM_GPU_DEVICE, m, n, k, lhs_transpose, rhs_transpose);
+  // VLOG(0) << "Finish get key " << key;
+  // if(rocm_profile() == 1) {
+  //   t2 = std::chrono::system_clock::now();
+  // }
+
+  const auto& tvm_impl = tvm_impl_cache_->LookUp(key);
+  // if(rocm_profile() == 1) {
+  //   t3 = std::chrono::system_clock::now();
+  // }
+  //  VLOG(0) << "tvm impl " << tvm_impl.flag_;
+  // VLOG(0) << "Finish look up key.";
+  // VLOG(0) << "Look up TVM func cache for " << key;
+  if (tvm_impl.IsHit()) {
+    // VLOG(0) << "Look up TVM func cache hit for " << key;
+    auto args = std::vector<void*>({
+      // static_cast<const void*>(se::gpu::GpuMemoryMutable(lhs_data)),
+      // static_cast<const void*>(se::gpu::GpuMemoryMutable(rhs_data)),
+      // static_cast<void*>(se::gpu::GpuMemoryMutable(output_data))
+      lhs_data.opaque(), rhs_data.opaque(), output_data.opaque()
+      });
+
+    return tvm_impl.Launch(stream, static_cast<void*>(args.data()), 
+        sizeof(args)
+        // , nullptr, 
+        // rhs_data,
+        // lhs_data,
+        // &output_data
+        );
+    // if(rocm_profile() == 1) {
+    //   t4 = std::chrono::system_clock::now();
+    //   auto time0 = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+    //   auto time1 = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+    //   auto time2 = std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
+    //   auto time3 = std::chrono::duration_cast<std::chrono::microseconds>(t4 - t3).count();
+    //   // VLOG(0) << "TimeDur for kernel func call "  << time0 << " " << time1 << " " << time2  << 
+    //   //     " " << time3 << "us"; 
+    // }
+    // if (k == n) {
+    //   VLOG(0) << "Finish tvm "  << (s?1:0) << " " << key;
+    // }  
+  } else {
+    VLOG(1) << "TVM func cache miss for " << key;
+  }
+  return false;
+}
+
+
+
 struct RalGemmState : public Context::Resource {
   std::mutex mu;
   std::map<GemmTuningCacheKey, se::blas::AlgorithmType> gemm_tuning_cache;
@@ -271,10 +400,24 @@ template <typename InT, typename OutT, typename E = float>
 void ral_gemm(ExecutionContext* ctx, void* stream_handle, MemRefType<InT, 2> A,
               MemRefType<InT, 2> B, MemRefType<OutT, 2> C, bool tp_a,
               bool tp_b) {
+  std::chrono::system_clock::time_point t0, t1;
+  se::port::Status block_status;
+  static double dur = 0;
+  static int cnt = 0;
+
+
   if (isEmptyMemref(A) || isEmptyMemref(B) || isEmptyMemref(C)) {
     TAO_VLOG(1) << "ral_gemm: early return for empty tensor";
     return;
   }
+
+  auto m = tp_a?A.sizes[1]:A.sizes[0];
+  auto n = tp_b?B.sizes[0]:B.sizes[1];
+  auto k = tp_a?A.sizes[0]:A.sizes[1];
+
+  tvm_impl::CollectorAddGemmKernel<InT, OutT, E>(TVM_GPU_DEVICE,
+     m, n, k,
+     tp_a, tp_b);
 
   auto lhs_matrix =
       makeMatrixDescriptor(ctx, A.data, A.sizes[0], A.sizes[1], tp_a);
@@ -304,6 +447,60 @@ void ral_gemm(ExecutionContext* ctx, void* stream_handle, MemRefType<InT, 2> A,
   auto gpu_driver = ctx->getDriver<GPUDriver>(GPUDriver::name());
   auto stream =
       static_cast<se::Stream*>(gpu_driver->asSEStream(ctx, stream_handle));
+        
+  if (rocm_profile() == 1) {
+    // if ((A.sizes[0] == 11776 || A.sizes[0] == 5888) &&
+    //   (B.sizes[0] == 11776 || B.sizes[0] == 5888 )) {
+      t0 = std::chrono::system_clock::now();  
+      block_status = stream->BlockHostUntilDone();
+    // }
+  }
+  // if (rocm_profile() == 1) {
+  //     t1 = std::chrono::system_clock::now();
+  // }
+  static tensorflow::int64 use_tvm_kernel = -1;
+  if (use_tvm_kernel == -1) {
+    tensorflow::ReadInt64FromEnvVar("TAO_USE_OPT_KERNEL", 0,
+                                 &use_tvm_kernel);
+  }
+  static tensorflow::int64 interval = -1;
+  if (interval == -1) {
+    tensorflow::ReadInt64FromEnvVar("TVM_PROF_INTERVAL", 100,
+                                 &interval);
+  }
+
+  if (use_tvm_kernel == 1) {
+    // if (rocm_profile() == 1) {
+    //   t2 = std::chrono::system_clock::now();
+    // }
+    if (DoGemmWithTVM<InT, OutT, E>(1, lhs_matrix, rhs_matrix, output_matrix, stream)) {
+      VLOG(2) << "Launch TVM kernel complete.";
+      if (rocm_profile() == 1) {
+        //  if ((A.sizes[0] == 11776 || A.sizes[0] == 5888) && 
+        //    (B.sizes[0] == 11776 || B.sizes[0] == 5888 )) {
+        block_status = stream->BlockHostUntilDone();
+        t1 = std::chrono::system_clock::now();
+        auto time0 = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+        cnt++;
+        dur += time0;
+        if (cnt == interval) {
+          VLOG(0) << "TimeDur for TVM func " << A.sizes[0] << "_" << A.sizes[1] 
+           << "_" << B.sizes[0] << "_" << B.sizes[1] << " " << dur/cnt << " us";    
+          cnt = 0;
+          dur = 0;
+        }
+        // auto time1 = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+        // auto time2 = std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
+        // VLOG(0) << "TimeDur for kernel func call "  << time0  << " " << time1 << " " << time2 << "us";
+      // }
+      }
+      return;
+    } else {
+      VLOG(2) << "Launch TVM kernel error.";
+    }
+  } else {
+    VLOG(2) << "No TVM kernel mode configured.";
+  }
 
   bool disable_tune = true;
   tensorflow::ReadBoolFromEnvVar("TAO_DISABLE_CUDA_GEMM_TUNE", true,
@@ -340,6 +537,27 @@ void ral_gemm(ExecutionContext* ctx, void* stream_handle, MemRefType<InT, 2> A,
     TAO_VLOG(0) << "gemm fails to launch";
     ctx->signalError(Context::FAILURE, "fail to launch gemm");
   }
+
+    if (rocm_profile() == 1) {
+      // if ((A.sizes[0] == 11776 || A.sizes[0] == 5888) &&
+      //   (B.sizes[0] == 11776 || B.sizes[0] == 5888 )) {
+    
+        block_status = stream->BlockHostUntilDone();
+        t1 = std::chrono::system_clock::now();
+        auto time0 = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+        cnt++;
+        dur += time0;
+        if (cnt == interval) {
+          VLOG(0) << "TimeDur for rocblas func " << A.sizes[0] << "_" << A.sizes[1] 
+           << "_" << B.sizes[0] << "_" << B.sizes[1] << " " << dur/cnt << " us";    
+          cnt = 0;
+          dur = 0;
+        }
+        // auto time1 = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+        // auto time2 = std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
+        // VLOG(0) << "TimeDur for kernel func call "  << time0  << " " << time1 << " " << time2 << "us";
+        // }
+  }
 }
 
 template <typename T, int N>
@@ -350,6 +568,7 @@ int64_t GetBatchSize(MemRefType<T, N> memref) {
   }
   return batch;
 }
+
 
 template <typename InT, typename OutT, int N, typename E = float>
 void ral_batch_gemm(ExecutionContext* ctx, void* stream_handle,

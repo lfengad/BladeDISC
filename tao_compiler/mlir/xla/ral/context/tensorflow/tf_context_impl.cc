@@ -29,6 +29,9 @@
 #include "tensorflow/compiler/mlir/xla/ral/ral_helper.h"
 #include "tensorflow/stream_executor/device_description.h"
 #include "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_collector.h"
+#include <iostream>
+#include <fstream>
+#include "tensorflow/stream_executor/rocm/rocm_driver_wrapper.h"
 
 namespace se = stream_executor;
 
@@ -446,7 +449,25 @@ void ral_tf_gpu_launch(ExecutionContext* ctx, void** blobs, size_t num_blobs,
 
     auto key = std::make_pair(blob, std::string(kernel_name));
     auto it = state->kernels.find(key);
-    VLOG(0) << "Kernel " << key.second << " " << num_args;
+    // VLOG(0) << "Kernel " << key.second << " " << num_args;
+    // VLOG(0) << sizeof((char*) blob);
+    // if (key.second == "main_kRowReduction_reduce__4_1_0") {
+    //   hipModule_t hipmodule;
+    //   hipError_t res = tensorflow::wrap::hipModuleLoadData(&hipmodule, reinterpret_cast<const void*>(blob));
+    //    if (res != hipSuccess) {
+    //     VLOG(0) << "error for hsoco build in bridge";
+    //   } else {
+    //     VLOG(0) << "Finish for hsoco build in bridge ";
+    //   }
+
+    // // }
+    // std::ofstream of("bridge.txt", std::ios_base::app);
+    // of << key.second << std::endl;
+    // for (int i = 0; i < 9500; i++) {
+    //     of << (int)((reinterpret_cast<const uint8_t*>(blob))[i]) << " ";
+    // }
+    // of << std::endl;
+
     if (it == state->kernels.end()) {
       se::MultiKernelLoaderSpec spec(num_args);
       spec.AddCudaCubinInMemory((char*)blob, (char*)kernel_name);

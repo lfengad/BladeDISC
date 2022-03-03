@@ -124,6 +124,7 @@ endif()
 
 if(${TAO_DCU})
     list(APPEND TAO_OPS_DEFINITIONS "-DTENSORFLOW_USE_DCU")
+    list(APPEND TAO_OPS_DEFINITIONS "-DTENSORFLOW_USE_ROCM")
     message(STATUS "Define preprocess macro: -DTENSORFLOW_USE_DCU")
 endif()
 

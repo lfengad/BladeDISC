@@ -32,6 +32,7 @@ tao_option(TAO_ENABLE_PATINE "if ON, using patine for compute-intensive ops" OFF
 tao_option(TAO_ENABLE_MKLDNN "if ON, using mkldnn for compute-intensive ops" OFF)
 set(MKL_ROOT "third_party/mkldnn/build/intel" CACHE STRING "Set to mkl_root if enable MKL")
 tao_option(GTEST_TAR_URL "download cmake tarball via URL" "https://github.com/google/googletest/archive/refs/tags/release-1.11.0.tar.gz")
+tao_option(ROCM_PATH "Path to the ROCM toolchain" /opt/rocm-4.5.0/)
 
 ############## config start ##############
 if (NOT UNIX)
@@ -123,7 +124,14 @@ endif()
 
 if(${TAO_DCU})
     list(APPEND TAO_OPS_DEFINITIONS "-DTENSORFLOW_USE_DCU")
+    list(APPEND TAO_OPS_DEFINITIONS "-DTENSORFLOW_USE_ROCM")
     message(STATUS "Define preprocess macro: -DTENSORFLOW_USE_DCU")
+    message(STATUS "Define preprocess macro: -DTENSORFLOW_USE_ROCM")
+endif()
+
+if(${TAO_ROCM})
+  list(APPEND TAO_OPS_DEFINITIONS "-DTENSORFLOW_USE_ROCM")
+  message(STATUS "Define preprocess macro: -DTENSORFLOW_USE_ROCM")
 endif()
 
 message(STATUS "TAO_OPS_DEFINITIONS:")

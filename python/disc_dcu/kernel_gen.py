@@ -2,6 +2,7 @@ import os, sys
 import glob, shutil
 import numpy as np
 from filelock import FileLock
+import subprocess
 TVM_PATH = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(TVM_PATH)
 os.environ["PYTHONPATH"] = ":".join([TVM_PATH, os.environ.get("PYTHONPATH", "")])
@@ -25,7 +26,20 @@ from tvm.topi.utils import get_const_tuple
 
 # logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 
-TARGET = "rocm -mcpu=gfx908"
+
+
+def get_target():
+    TARGET = "rocm"
+    targets = subprocess.getoutput("rocm_agent_enumerator")
+    targets = targets.strip().split("\n")
+    target = [] 
+    for t in targets:
+        if t != "gfx000" and t != "gfx900":
+            target.append(t)
+    if len(target) == 1:
+        TARGET += " -mcpu={}".format(target[0])
+    return TARGET
+
 
 def parse():
     parser = argparse.ArgumentParser()
@@ -381,7 +395,7 @@ def rewrite_meta(fname, sch):
             
 def compile(args, s, farg, dtype="float32", codegen="topi", key=None):
     ss = tvm.lower(s, farg, simple_mode=True)
-    m = tvm.build(s, farg, target=TARGET)
+    m = tvm.build(s, farg, target=get_target())
     # m.save("debug.ll", fmt="ll")
     # print(len(m.imported_modules))
     if key and codegen in ["ansor", "topi", "autotvm", "autotvm1"]:
@@ -443,7 +457,7 @@ def gemm_compute(shape_a, shape_b, transp_a, transp_b, dtype):
     return [A, B, out]
 
 def autotvm_gemm(args, shape_a, shape_b, transp_a, transp_b, dtype, template="sample/gemm_splitK"):
-    target = TARGET
+    target = get_target()
     task = autotvm.task.create(template, args=(shape_a, shape_b, transp_a, transp_b, dtype), target=target)
     logger.debug(task.config_space)
     autotvmlog = get_temptunelog(args)
@@ -476,7 +490,7 @@ def autotvm_gemm(args, shape_a, shape_b, transp_a, transp_b, dtype, template="sa
     
 
 def tune_gemm(args, shape_a, shape_b, transp_a, transp_b, dtype):
-    target = TARGET
+    target = get_target()
     tune_log = get_tunelog(args)
     logger.debug("Tuning log save to {}.".format(tune_log))
     task = tvm.auto_scheduler.SearchTask(func=gemm_compute, args=(shape_a, shape_b, transp_a, transp_b, dtype), target=target)

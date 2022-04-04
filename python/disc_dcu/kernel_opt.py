@@ -44,7 +44,7 @@ def parse_profiling(cache, limit):
     
 def sort(cache=None, limit=1000):
     os.environ["DISC_KERNEL_PROFILING"] = "1"
-    cmd = "{} --mode profile --codegen rocblas,autotvm,autotvm1,ansor".format(get_path())
+    cmd = "{} --mode profile --codegen rocblas".format(get_path())
     if cache is not None:
         cmd += " --cache {}".format(cache)
         kernel_path = os.path.join(cache, "")

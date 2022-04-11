@@ -84,8 +84,6 @@ list(APPEND RAL_HDRS
     "tensorflow/compiler/mlir/xla/ral/context/common_context_impl.h"
     "tensorflow/compiler/mlir/xla/ral/context/stream_executor_based_impl.h"
     "tensorflow/compiler/mlir/xla/ral/context/tensorflow/tf_context_impl.h"
-    "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_cache.h"
-    "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_collector.h"
     "tensorflow/compiler/mlir/xla/ral/device/cpu/cpu_driver.h"
     "tensorflow/compiler/mlir/xla/ral/device/gpu/gpu_driver.h"
     "tensorflow/compiler/mlir/xla/ral/ral_api.h"
@@ -102,8 +100,6 @@ list(APPEND RAL_SRCS
     "tensorflow/compiler/mlir/xla/ral/context/stream_executor_based_impl.cc"
     "tensorflow/compiler/mlir/xla/ral/context/tensorflow/tf_context_impl.cc"
     "tensorflow/compiler/mlir/xla/ral/context/tensorflow/tf_kernel_impl.cc"
-    "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_cache.cc"
-    "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_collector.cc"  
     "tensorflow/compiler/mlir/xla/ral/device/cpu/cpu_driver.cc"
     "tensorflow/compiler/mlir/xla/ral/device/gpu/gpu_driver.cc"
     "tensorflow/compiler/mlir/xla/ral/ral_api.cc"
@@ -137,9 +133,13 @@ endif()
 if((${TAO_DCU}) OR (${TAO_ROCM}))
   list(APPEND RAL_SRCS
     "tensorflow/compiler/mlir/xla/ral/context/common_context_impl_cuda.cc"
+    "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_cache.cc"
+    "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_collector.cc"  
   )
   list(APPEND RAL_HDRS
     "tensorflow/compiler/mlir/xla/ral/context/common_context_impl_cuda.h"
+    "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_cache.h"
+    "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_collector.h"
   )
 endif()
 

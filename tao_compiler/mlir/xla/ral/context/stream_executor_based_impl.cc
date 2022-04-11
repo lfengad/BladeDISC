@@ -23,9 +23,11 @@
 #include "tensorflow/compiler/mlir/xla/ral/ral_logging.h"
 #include "tensorflow/core/public/version.h"
 #include "tensorflow/core/util/env_var.h"
+#if TENSORFLOW_USE_ROCM
 #include "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_cache.h"
 #include "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_collector.h"
 #include "tensorflow/stream_executor/gpu/gpu_helpers.h"
+#endif
 
 #ifdef TAO_RAL_USE_STREAM_EXECUTOR
 
@@ -392,7 +394,7 @@ static bool DoGemmWithTVM(
   // if (rocm_profile() == 1) {
   //     t0 = std::chrono::system_clock::now();
   // }    
-
+#if TENSORFLOW_USE_ROCM
   DCHECK(!output_matrix.transpose);
   se::DeviceMemory<InT> lhs_data(lhs_matrix.data);
   se::DeviceMemory<InT> rhs_data(rhs_matrix.data);
@@ -463,6 +465,7 @@ static bool DoGemmWithTVM(
   } else {
     VLOG(1) << "OPT func cache miss for " << key;
   }
+#endif
   return false;
 }
 
@@ -488,6 +491,7 @@ void ral_gemm(ExecutionContext* ctx, void* stream_handle, MemRefType<InT, 2> A,
     return;
   }
 
+#if TENSORFLOW_USE_ROCM
   auto m = tp_a?A.sizes[1]:A.sizes[0];
   auto n = tp_b?B.sizes[0]:B.sizes[1];
   auto k = tp_a?A.sizes[0]:A.sizes[1];
@@ -495,6 +499,7 @@ void ral_gemm(ExecutionContext* ctx, void* stream_handle, MemRefType<InT, 2> A,
   tvm_impl::CollectorAddGemmKernel<InT, OutT, E>(tvm_impl::CollectorDeviceStr(),
      m, n, k,
      tp_a, tp_b);
+#endif
 
   auto lhs_matrix =
       makeMatrixDescriptor(ctx, A.data, A.sizes[0], A.sizes[1], tp_a);
@@ -546,6 +551,7 @@ void ral_gemm(ExecutionContext* ctx, void* stream_handle, MemRefType<InT, 2> A,
                                  &interval);
   }
 
+#if TENSORFLOW_USE_ROCM
   if (use_tvm_kernel == 1) {
     // if (rocm_profile() == 1) {
     //   t2 = std::chrono::system_clock::now();
@@ -586,6 +592,7 @@ void ral_gemm(ExecutionContext* ctx, void* stream_handle, MemRefType<InT, 2> A,
   } else {
     VLOG(2) << "No OPT kernel mode configured.";
   }
+#endif
 
   bool disable_tune = true;
   tensorflow::ReadBoolFromEnvVar("TAO_DISABLE_CUDA_GEMM_TUNE", true,

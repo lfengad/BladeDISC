@@ -29,10 +29,13 @@
 #include "tensorflow/compiler/mlir/xla/ral/ral_helper.h"
 #include "tensorflow/core/public/version.h"
 #include "tensorflow/stream_executor/device_description.h"
+#if TENSORFLOW_USE_ROCM
 #include "tensorflow/compiler/mlir/xla/ral/context/tvm_kernel_collector.h"
+#include "tensorflow/stream_executor/rocm/rocm_driver_wrapper.h"
+#endif
 #include <iostream>
 #include <fstream>
-#include "tensorflow/stream_executor/rocm/rocm_driver_wrapper.h"
+
 
 namespace se = stream_executor;
 
@@ -116,8 +119,10 @@ struct RalTFContextState : public ::tao::ral::Context::Resource {
 
 RalTfContext::RalTfContext(const RalTfContextOptions& options) {
   // TODO: add a macro to control if we should enbale gpu.
+  #if TENSORFLOW_USE_ROCM
   tao::ral::tvm_impl::CollectorCheckEnable();
   tao::ral::tvm_impl::CollectorCheckDevice();
+  #endif
   addDriver(::tao::ral::gpu::GPUDriver::name(),
             absl::make_unique<::tao::ral::gpu::GPUDriver>(this));
   addDriver(::tao::ral::cpu::CPUDriver::name(),
@@ -146,18 +151,24 @@ RalTfContext::RalTfContext(const RalTfContextOptions& options) {
 }
 
 RalTfContext::~RalTfContext() {
+  #if TENSORFLOW_USE_ROCM
   tao::ral::tvm_impl::CollectorDumpResults();
+  #endif
 }
 
 RalTfExecutionContext::RalTfExecutionContext(RalTfContext* ctx)
     : ExecutionContext(ctx), impl_(new Impl) {
+      #if TENSORFLOW_USE_ROCM
   tao::ral::tvm_impl::CollectorCheckEnable();  
-  tao::ral::tvm_impl::CollectorCheckDevice();   
+  tao::ral::tvm_impl::CollectorCheckDevice();  
+  #endif 
   onExecutionStart();
 }
 
 RalTfExecutionContext::~RalTfExecutionContext() { onExecutionFinish(); 
+#if TENSORFLOW_USE_ROCM
  tao::ral::tvm_impl::CollectorDumpResults();
+ #endif
 }
 
 void RalTfExecutionContext::setOpContext(OpKernelContext* ctx) {

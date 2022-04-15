@@ -181,8 +181,13 @@ class GpuKernelToBlobPass
     //   // std::string ll(data_ll.begin(), data_ll.end());
     //   // VLOG(0) << ll;
     // }
+    bool use_llvm;
+    tensorflow::ReadBoolFromEnvVar("DISC_USE_LLVM",
+                                     true, &use_llvm);
 
-#if (TENSORFLOW_USE_DCU && !TENSORFLOW_USE_DCU_WITH_LLVM_ROCM_BACKEND)
+//#if (TENSORFLOW_USE_DCU && !TENSORFLOW_USE_DCU_WITH_LLVM_ROCM_BACKEND)
+#if (TENSORFLOW_USE_ROCM)
+  if (!use_llvm) {
     VLOG(0) << "Use ROCM NORMAL";
     int device_id;
     ROCM_CALL(hipGetDevice(&device_id));
@@ -215,7 +220,7 @@ class GpuKernelToBlobPass
 
     std::string llvm_path_1;
     tensorflow::ReadStringFromEnvVar("DISC_DCU_BACKEND_PATH",
-                                     "/opt/dtk-21.10/llvm/bin/", &llvm_path_1);
+                                     "/opt/rocm-4.5.0/llvm/bin/", &llvm_path_1);
     std::string llvm_path_2 = tensorflow::io::JoinPath("/opt/rocm", "hcc/bin");
     std::string llvm_path_3 = tensorflow::io::JoinPath("/opt/rocm", "llvm/bin");
     auto llc_program = llvm::sys::findProgramByName(
@@ -235,12 +240,26 @@ class GpuKernelToBlobPass
     std::string ll_path = tmp_path + random_number + ".ll";
     std::string isabin_path = tmp_path + random_number + ".o";
     std::string hsaco_path = tmp_path + random_number + ".hsaco";
+    auto kname = gpu_module.getName().str();
+    VLOG(0) << "Kernel name "  << gpu_module.getName().str();
+    ll_path =  kname+"_debug.ll";
+    isabin_path = kname+"_debug.o";
+    hsaco_path = kname+ "_debug.hsaco";
 
     std::error_code ec;
     std::unique_ptr<llvm::raw_fd_ostream> ll_fs(
         new llvm::raw_fd_ostream(ll_path, ec, llvm::sys::fs::OF_None));
     llvmModule->print(*ll_fs, nullptr);
     ll_fs->flush();
+
+
+    std::string given_ll = "";
+    TF_CHECK_OK(tensorflow::ReadStringFromEnvVar("DISC_LL",
+			    "", &given_ll));
+    if (!given_ll.empty()) {
+	ll_path = given_ll;
+    }
+
 
     std::string opt_level;
     tensorflow::ReadStringFromEnvVar("DISC_DCU_BACKEND_OPT_LEVEL", "3",
@@ -251,10 +270,13 @@ class GpuKernelToBlobPass
     // } else if (gpu_module.getName().str() == "main_kernel_5") {
     //   ll_path = "/home/fl237079/newll.ll";
     // }
+    //
+    VLOG(0) << "Compile opt level " << opt_level << " arch str " << arch_str << " ll " << ll_path;
 
     if (VLOG_IS_ON(2)) {
       // Dump asm file
       std::string asm_path = tmp_path + random_number + ".asm";
+      asm_path = kname+ "_debug.asm";
       std::vector<llvm::StringRef> llc_args{
           AsStringRef("llc"),
           AsStringRef("-O"),
@@ -264,7 +286,7 @@ class GpuKernelToBlobPass
           AsStringRef("-mcpu"),
           AsStringRef(arch_str),
           AsStringRef("-amdhsa-code-object-version"),
-          AsStringRef("3"),
+          AsStringRef("4"),
           AsStringRef("-filetype"),
           AsStringRef("asm"),
           AsStringRef("-o"),
@@ -282,7 +304,7 @@ class GpuKernelToBlobPass
         AsStringRef("-mcpu"),
         AsStringRef(arch_str),
         AsStringRef("-amdhsa-code-object-version"),
-        AsStringRef("3"),
+        AsStringRef("4"),
         AsStringRef("-filetype"),
         AsStringRef("obj"),
         AsStringRef("-o"),
@@ -309,7 +331,15 @@ class GpuKernelToBlobPass
         AsStringRef(hsaco_path)};
     TF_RETURN_IF_ERROR(ExecuteProgram(*lld_program, lld_args));
 
-    // Read HSACO.
+    VLOG(0) << "Dump to " << ll_path << " " << isabin_path << " "<< hsaco_path;
+    std::string given_hsaco = "";
+    TF_CHECK_OK(tensorflow::ReadStringFromEnvVar("DISC_HSACO",
+			    "", &given_hsaco));
+    if (!given_hsaco.empty()) {
+    	hsaco_path = given_hsaco;
+    }
+
+    VLOG(0) << "Read hsaco path " << hsaco_path;
     std::ifstream hsaco_file(hsaco_path, std::ios::binary | std::ios::ate);
     std::ifstream::pos_type hsaco_file_size = hsaco_file.tellg();
 
@@ -321,14 +351,14 @@ class GpuKernelToBlobPass
     TF_CHECK_OK(tensorflow::ReadBoolFromEnvVar("DISC_ROCM_KEEP_TEMPFILES",
                                                /*default_val=*/false,
                                                &keep_tempfiles));
-    if (!keep_tempfiles) {
+    /*if (!keep_tempfiles) {
       remove(ll_path.c_str());
       remove(isabin_path.c_str());
       remove(hsaco_path.c_str());
-    }
+    }*/
     return hsaco;
-
-#elif (TENSORFLOW_USE_DCU_WITH_LLVM_ROCM_BACKEND || TENSORFLOW_USE_ROCM)
+  } else {
+//#elif (TENSORFLOW_USE_DCU_WITH_LLVM_ROCM_BACKEND || TENSORFLOW_USE_ROCM)
     VLOG(0) << "Use ROCM LLVM";
     int device_id;
     ROCM_CALL(hipGetDevice(&device_id));
@@ -360,6 +390,8 @@ class GpuKernelToBlobPass
     libdevice_dir = tensorflow::io::JoinPath(rocm_path, "lib");
 #endif
 
+    auto kname = gpu_module.getName().str();
+    VLOG(0) << "Kernel name "  << gpu_module.getName().str();
     // if (gpu_module.getName().str() == "main_kernel_3") {
     //   {
     //     std::ifstream old("/home/fl237079/shenshi/deepmd-kit/examples/water/test/copper/trueir");  
@@ -411,10 +443,14 @@ class GpuKernelToBlobPass
     //     }
     //   }
     // }
+    auto llvm_module_copy = llvm::CloneModule(*llvmModule);
+
+    std::string given_ll = "";
+    TF_CHECK_OK(tensorflow::ReadStringFromEnvVar("DISC_LL",
+			    "", &given_ll));
 
    
     // VLOG(0) << "Kernel to Blob lib device dir " << libdevice_dir;
-    auto llvm_module_copy = llvm::CloneModule(*llvmModule);
     xla::gpu::GpuVersion gpu_version{arch_str};
     // if (gpu_module.getName().str() == "main_kernel_3") {
     //   VLOG(0) << "target " << arch_str;
@@ -422,7 +458,31 @@ class GpuKernelToBlobPass
     // }
     auto hsaco_or = xla::gpu::amdgpu::CompileToHsaco(
         llvm_module_copy.get(), gpu_version, config, libdevice_dir);
+    if (!given_ll.empty()) {
+         std::ifstream old(given_ll);  
+         std::stringstream ss;
+         ss << old.rdbuf();
+         llvm::LLVMContext ctx; 
+         auto old_module = parseAssembly(ss.str().c_str(), ctx);
+         llvm_module_copy = llvm::CloneModule(*(old_module.get()));
+         xla::gpu::GpuVersion gpu_version{arch_str};
+         hsaco_or = xla::gpu::amdgpu::CompileToHsaco(
+             llvm_module_copy.get(), gpu_version, config, libdevice_dir);
+	 VLOG(0) << "using new module form ll " << given_ll;
+    }
+    if (hsaco_or.ok()) {
+    	const auto& blob = hsaco_or.ValueOrDie();
+        std::string llvmpath = kname+"_debugllvm.hsaco";
+	auto myfile = std::fstream(llvmpath, std::ios::out | std::ios::binary);
+	myfile.write((char*)blob.data(), blob.size());
+	myfile.close();
+	VLOG(0) << "llvm hsaco to " << llvmpath;
+    } else {
+	VLOG(0) << "llvm compile hsaco fail";
+    }
+
     return hsaco_or;
+  }
 
 // #elif TENSORFLOW_USE_ROCM
 //     return InternalError("ROCM devices except for DCU is not implemented yet");

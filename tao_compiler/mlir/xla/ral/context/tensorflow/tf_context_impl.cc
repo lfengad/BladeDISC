@@ -500,7 +500,18 @@ void ral_tf_gpu_launch(ExecutionContext* ctx, void** blobs, size_t num_blobs,
     kernel_ptr = it->second.get();
   }
 
+//  VLOG(0) << "inside launch kernel";
   RalTfKernelArgsArrayBase kernel_args(params, num_args);
+
+  se::KernelArgIterator iter = kernel_args.arg_iterator();
+  while (iter.has_next()) {
+	se::KernelArg arg = iter.next();
+	VLOG(1) << "*(arg.address):" << reinterpret_cast<void*>(*static_cast<const uint64_t*>(arg.address));
+  }
+
+
+
+
   auto status = ral_to_bool(executor->Launch(
       stream, se::ThreadDim(blockX, blockY, blockZ),
       se::BlockDim(gridX, gridY, gridZ), *kernel_ptr, kernel_args));

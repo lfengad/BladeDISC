@@ -153,6 +153,9 @@ void KernelCollector::CheckDevice() {
         ROCM_CALL(hipGetDeviceProperties(&prop, device_id));
         auto arch_type = prop.gcnArch;
         device_env_ = "gfx" + std::to_string(arch_type); //906";
+        if(device_env_ == "gfx910") {
+            device_env_ = "gfx90a";
+        }
 #endif
     }
 };

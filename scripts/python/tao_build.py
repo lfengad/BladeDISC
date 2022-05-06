@@ -146,17 +146,21 @@ def configure_compiler(root, args):
     with cwd(root):
         if args.dcu or args.rocm:
             src = get_rocm_headers(args)
-            execute("rm -rf {0} && ln -s {1} {0}".format(os.path.join(tao_ral_dir(root), 'rocm', "include"),
+            rocm_header_root = os.path.join(tao_ral_dir(root), 'rocm')
+            if not os.path.exists(rocm_header_root):
+                os.makedirs(rocm_header_root)
+            execute("rm -rf {0} && ln -s {1} {0}".format(os.path.join(rocm_header_root, "include"),
                      src))
 
     # configure tensorflow
+    python_path = which("python3")
     with cwd(tf_root_dir()), gcc_env(args.compiler_gcc):
         cmd = "set -a && source {} && set +a &&".format(
             os.getenv("TAO_COMPILER_BUILD_ENV")
         )
         cmd += " env USE_DEFAULT_PYTHON_LIB_PATH=1"
         # tf master doesn't support python2 any more
-        cmd += " PYTHON_BIN_PATH=" + which("python3")
+        cmd += " PYTHON_BIN_PATH=" + python_path
         cmd += ' CC_OPT_FLAGS="-Wno-sign-compare"'
         cmd += " ./configure"
         logger.info(cmd)
@@ -280,6 +284,7 @@ def build_tao_compiler(root, args):
         rocm_env = os.environ.get("ROCM_PATH", None)
         if rocm_env is None:
             os.environ["ROCM_PATH"] = args.rocm_path
+        print(os.environ.get("ROCM_PATH", None))
         if targets is not None and target not in targets:
             logger.info("Skip bazel target: " + target)
             return
@@ -725,8 +730,7 @@ def parse_args():
     parser.add_argument(
         "--rocm_path",
         required=False,
-        # default='/opt/rocm-4.5.0',
-        default='/opt/dtk-21.04/',
+        default='/opt/rocm-5.1.0',
         help="Build tao where rocm locates",
     )
     parser.add_argument(

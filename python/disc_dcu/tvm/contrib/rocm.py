@@ -167,6 +167,8 @@ def callback_rocm_bitcode_path(rocdl_dir=None):
             p = join(rocdl_dir, n + ".amdgcn.bc")
         if exists(p):
             bitcode_files.append(p)
+        elif n == "hc":
+            pass
         elif "isa_version" not in n and n not in {"irif"}:
             raise RuntimeError("could not find bitcode " + n)
 

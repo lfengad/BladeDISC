@@ -7,7 +7,9 @@ from .common import *
 
 def PrepareEnv():
     path = os.path.dirname(os.path.abspath(__file__))
-    os.environ["DISC_DCU_ROCM_PATH"] = os.path.dirname(os.path.dirname(shutil.which("rocminfo")))
+    rocm_path = os.environ.get("ROCM_PATH", None)
+    if rocm_path is not None:
+        os.environ["DISC_ROCM_PATH"] = rocm_path
     os.environ["TAO_USE_OPT_KERNEL"] = "1"
     os.environ["TAO_OPT_KERNEL_PATTERN_ROCM"] = os.path.join(path, "kernel_cache")
     os.environ["BRIDGE_ENABLE_TAO"] = "true"

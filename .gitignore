@@ -15,3 +15,6 @@ tensorflow_blade/bazel-testlogs
 tensorflow_blade/dist
 tensorflow_blade/.build_config
 tensorflow_blade/.bazelrc_gen
+*hsaco
+*so
+dist

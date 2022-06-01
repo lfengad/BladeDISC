@@ -30,35 +30,14 @@
 	if (val != hipSuccess) exit(EXIT_FAILURE)
 
 
-#ifndef D0
-#define D0 1024
-#endif
-#ifndef D1
-#define D1 256
-#endif
-#ifndef D2
-#define D2 512
-#endif
-#ifndef LT
+#define D0 11776
+#define D1 25
+#define D2 50
 #define LT 256
-#endif
-#ifndef LB
-#define LB (D0/(LT/LW)*LG/LI) // 376832
-#endif
-#ifndef LW
+#define LB (D0/(LT/LW)*LG) // 376832
 #define LW 8
-#endif
-#ifndef LG
-#define LG ((D1 - 1)/LW + 1)
-#endif
-#ifndef LI
-#define LI 1
-#endif
+#define LG 4
 
-
-#ifndef TT
-#define TT float
-#endif
 
 template<typename T>
 __global__ void kernel(T* arg1, T* arg5, T* arg16, T* arg17, T* arg18, T* arg13, T* arg21, T* arg22) {
@@ -70,89 +49,58 @@ __global__ void kernel(T* arg1, T* arg5, T* arg16, T* arg17, T* arg18, T* arg13,
         int thread_x = threadIdx.x; //v16 % 256;
         int v23 = threadIdx.x / LW; // v32
         int v24 = threadIdx.x % LW; // v32
-        int v250 = blockIdx.x / LG;
-        int v25 = v250 / LI;
+        int v25 = blockIdx.x / LG;
         int v26 = blockIdx.x % LG;
-        // int v28 = v25 * (LT/LW) + v23; // limit 368
+        int v28 = v25 * (LT/LW) + v23; // limit 368
         int v30 = v26 * (LW) + v24; // limit 32 -> 25
+        bool v31 = v28 < D0;
         bool v32 = v30 < D1;
-        if (v32) {
-          T local = 0.0;
-          for (int i = 0; i < LI; i++) {
-            int v28 = (v25 * LI + i) * (LT/LW) + v23;
-            bool v31 = v28 < D0;
-            if (v31 && v32) {
-              int v53 = v28 * D1 + v30;
-              T v55 = arg5[v53]; // total arg6
-              // T v64 = arg13[v28 * D2 + v30]; // total arg12 * arg11
-              // T v70 = arg13[v28 * D2 + v30 + D1];
-              // T v71 = v55 + v64 + v70;
-              // T v73 = arg1[v53]; //total arg6
-              // T v76 = arg16[v53];//total arg6
-              // T v78 = arg17[v53];//total arg6
-              // T v81 = -2 * v76 * v78 * v73 + v71;
-              // T v83 = arg18[v53]; // total arg6
-              // T v84 = v83 * v81;
-              // arg21[v53] = v84; // total arg19 * 
-              // local += v84;
-              local += v55;
-            } 
-          }
-          arg23[thread_x] = local;
+        if (v31 && v32) {
+            int v53 = v28 * D1 + v30;
+            T v55 = arg5[v53]; // total arg6
+            T v64 = arg13[v28 * D2 + v30]; // total arg12 * arg11
+            T v70 = arg13[v28 * D2 + v30 + D1];
+            T v71 = v55 + v64 + v70;
+            T v73 = arg1[v53]; //total arg6
+            T v76 = arg16[v53];//total arg6
+            T v78 = arg17[v53];//total arg6
+            T v81 = -2 * v76 * v78 * v73 + v71;
+            T v83 = arg18[v53]; // total arg6
+            T v84 = v83 * v81;
+            arg21[v53] = v84; // total arg19 * 
+            arg23[thread_x] = v84;
         } else {
-          arg23[thread_x] = 0;
+            arg23[thread_x] = 0;
         }
         __syncthreads();
+
         int fac = LT;
-
-        while(fac > LW * 2) {
-          fac = fac/2;
-          if (threadIdx.x < fac && ((v25 * LI) * (LT/LW) + v23) + fac / LW  < D0) {
-                arg23[thread_x] = arg23[thread_x] + arg23[thread_x + fac];
-            }
-
-          __syncthreads();
+        while(fac * 2 > LW) {
+          fac = fac / 2;
+          if (threadIdx.x < fac && v28 + fac / LW < D0) {
+                  arg23[thread_x] = arg23[thread_x] + arg23[thread_x + fac];
+              }
+          __syncthreads(); 
         }
-        //  fac = fac/2;
-        // if (threadIdx.x < fac && v28 + fac / LW < D0) {
-        //     arg23[thread_x] = arg23[thread_x] + arg23[thread_x + fac];
-        // }
-        // __syncthreads();
-        //  fac = fac/2;
-        // if (threadIdx.x < fac && v28 + fac / LW < D0) {
-        //     arg23[thread_x] = arg23[thread_x] + arg23[thread_x + fac];
-        // }
-        // __syncthreads();
-        //  fac = fac/2;
-        // if (threadIdx.x < fac && v28 + fac / LW < D0) {
-        //     arg23[thread_x] = arg23[thread_x] + arg23[thread_x + fac];
-        // }
-        // __syncthreads();
-        if (v23 == 0 && (v25 * LI) * (LT/LW) + v23 < D0 && v32) {
+        if (v23 == 0 && v31 && v32) {
             atomicAdd(&arg22[v30], arg23[thread_x] + arg23[thread_x + LW]);
         }
     }
 }
 
-// template __global__ void kernel<TT>();
+// template __global__ void kernel<double>();
 
 
 int main() {
   const int d0 = D0;
   const int d1 = D1;
   const int d2 = D2;
-  TT* ptr[6]; 
-  TT* output, *output0;
-  uint64_t mem_size = d0 * d1 * sizeof(TT);
-  uint64_t mem_size0 = d0 * d2 * sizeof(TT);
-  uint64_t mem_size1 = d1 * sizeof(TT);
+  double* ptr[6]; 
+  double* output, *output0;
+  uint64_t mem_size = d0 * d1 * sizeof(double);
+  uint64_t mem_size0 = d0 * d2 * sizeof(double);
+  uint64_t mem_size1 = d1 * sizeof(double);
   
-  hipDeviceProp_t device_prop;
-  hipGetDeviceProperties(&device_prop, 0);
-  int sm_count = device_prop.multiProcessorCount;
-  int thread_count =  device_prop.maxThreadsPerMultiProcessor;
-  printf("SM sount is %d, Per SM is %d\n", sm_count, thread_count);
-
 
   for (int i = 0; i < 5; i++) {
     checkCudaErrors(hipMalloc(reinterpret_cast<void**>(&ptr[i]), mem_size));
@@ -161,8 +109,8 @@ int main() {
 
   checkCudaErrors(hipMalloc(reinterpret_cast<void**>(&output), mem_size));
   checkCudaErrors(hipMalloc(reinterpret_cast<void**>(&output0), mem_size1));
-  TT* h_init = reinterpret_cast<TT*>(malloc(mem_size0));
-  for (int64_t i = 0; i < mem_size0/sizeof(TT) ; i++) {
+  double* h_init = reinterpret_cast<double*>(malloc(mem_size0));
+  for (int64_t i = 0; i < mem_size0/sizeof(double) ; i++) {
       h_init[i] = 0.001;
    //   printf("%f ", h_init[i]);
   }
@@ -184,19 +132,19 @@ int main() {
   hipEvent_t start, stop;
   checkCudaErrors(hipEventCreate(&start));
   checkCudaErrors(hipEventCreate(&stop));
-  TT* o_init = reinterpret_cast<TT*>(malloc(mem_size1));
+  double* o_init = reinterpret_cast<double*>(malloc(mem_size1));
   memset(o_init, 0, mem_size1);
 
   // warmup
   checkCudaErrors(hipEventRecord(start));
-  int times = 100;
+  int times = 1;
   for (int i = 0; i < times; i++) {
 	  /*
   	for (int64_t j = 0; j < mem_size/sizeof(float) ; j++) {
     		h_init[j] = 0.001*i;
   	}
         checkCudaErrors(hipMemcpy(input, h_init, mem_size, hipMemcpyDefault));*/
-	kernel<TT><<<LB, LT>>>(ptr[0], ptr[1], ptr[2], ptr[3], ptr[4], ptr[5], output, output0);
+	kernel<double><<<LB, LT>>>(ptr[0], ptr[1], ptr[2], ptr[3], ptr[4], ptr[5], output, output0);
         // softmax1st_simple<<<d0, launch_dim>>>(input, output, d1);
 	/*
   	checkCudaErrors(hipMemcpy(o_init, output, mem_size0, hipMemcpyDefault));*/
@@ -209,8 +157,7 @@ int main() {
 //   float* o_mid = reinterpret_cast<float*>(malloc(mem_size));
 //   memset(o_mid, 0, mem_size);
   checkCudaErrors(hipMemcpy(o_init, output0, mem_size1, hipMemcpyDefault));
-   printf("output: ");
-   for (int64_t i = 0; i < mem_size1/sizeof(TT); i++) {
+   for (int64_t i = 0; i < mem_size1/sizeof(double); i++) {
  	 printf(" %f ", o_init[i]);
    }
    printf("\n");

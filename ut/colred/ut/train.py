@@ -157,7 +157,7 @@ def train_sample(args):
         x0 = int(size[0])
         x1 = int(size[1])
         net = NetworkCol(x0, x1)
-        x_data = np.linspace(-1,1, 11776*25).reshape(11776, 25)
+        x_data = np.linspace(-1,1, x0*x1).reshape(x0, x1)
         input_dict = {net.x0 : x_data}#, net.x1 : x_data, net.x2 : x_data} 
     elif args.type == "simple":
         x0 = int(size[0])

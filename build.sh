@@ -4,8 +4,8 @@ DEST=/home/fl237079/workspace/tao_built
 PPATH=/opt/venv/lib/python3.6/site-packages/disc_dcu/
 
 
-yes "" | python ${ENTRY} ${VENV_PATH} -s configure --bridge-gcc default --compiler-gcc default --rocm --rocm_path /opt/rocm-5.1.0
-python ${ENTRY} ${VENV_PATH} -s build_tao_bridge --rocm --rocm_path /opt/rocm-5.1.0
+#yes "" | python ${ENTRY} ${VENV_PATH} -s configure --bridge-gcc default --compiler-gcc default --rocm --rocm_path /opt/rocm-5.1.0
+#python ${ENTRY} ${VENV_PATH} -s build_tao_bridge --rocm --rocm_path /opt/rocm-5.1.0
 python ${ENTRY} ${VENV_PATH} -s build_tao_compiler --rocm --rocm_path /opt/rocm-5.1.0
 #python ${ENTRY} ${VENV_PATH} -s build_mlir_ral --rocm
 yes | cp tao/bazel-bin/libtao_ops.so ${DEST}

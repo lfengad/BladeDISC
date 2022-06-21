@@ -88,7 +88,6 @@ LogicalResult ShapeAnalysis::buildShapeMap() {
     }
   }
   postProcessingDimValues();
-
   return success();
 }
 
@@ -288,6 +287,7 @@ LogicalResult ShapeAnalysis::buildRegionDimValueMap(Region* region) {
     return region->getParentOp()->emitError(
         "only single block region is supported");
   }
+
   for (Block& block : *region) {
     if (failed(buildBlockDimValueMap(&block))) return failure();
   }
@@ -439,6 +439,9 @@ LogicalResult ShapeAnalysis::buildBlockDimValueMap(Block* block) {
           begin = 1;
           end = in_rank - 1;
         }
+        if (begin < 0) {
+          continue;
+        }
         for (int64_t in_idx = begin; in_idx < end; in_idx++) {
           if (in_mapped.contains(in_idx)) {
             continue;
@@ -459,6 +462,7 @@ LogicalResult ShapeAnalysis::buildBlockDimValueMap(Block* block) {
         }
         in_non_mapped.insert(in_idx);
       }
+
       int64_t key;
       DenseSet<int64_t> vals;
       Value key_from;
@@ -513,6 +517,7 @@ LogicalResult ShapeAnalysis::buildBlockDimValueMap(Block* block) {
       Value result = op->getResult(0);
       auto type = result.getType().cast<MemRefType>();
       assert(type);
+      // auto rank = ;
       for (int64_t i = 0; i < type.getRank(); i++) {
         DimValue dimVal;
         if (type.isDynamicDim(i)) {  // Only dynamic dims are operands.
@@ -612,11 +617,11 @@ LogicalResult ShapeAnalysis::buildBlockDimValueMap(Block* block) {
 
 LogicalResult ShapeAnalysis::buildDimValueMap(Value operand, int64_t dim,
                                               DimValue dimValue) {
+              
   auto symbol = getDim(operand, dim);
   if (symbol == nullptr) {
     return failure();
   }
-
   auto rootDimVal = dimSymbol2DimValue_.find(symbol);
   if (rootDimVal != dimSymbol2DimValue_.end() &&
       rootDimVal->second != dimValue) {
@@ -636,6 +641,11 @@ SymbolShape* ShapeAnalysis::getShape(Value value) {
   for (int64_t i = 0; i < it->second.rank(); ++i) {
     it->second.setSymbolDim(i, getDim(value, i));
   }
+  auto rank = it->second.rank();
+
+  if (rank < 0 || rank > 1000) {
+    assert(false);
+  }
   return &it->second;
 }
 
@@ -653,14 +663,16 @@ SymbolDim* ShapeAnalysis::getRootDim(SymbolDim* symbolDim) {
 
 SymbolDim* ShapeAnalysis::getDim(Value value, int64_t dim) {
   auto it = shapeMap_.find(value);
-  if (it == shapeMap_.end()) return nullptr;
-
+  if (it == shapeMap_.end()) { 
+    return nullptr;
+  }
+  if (it->second.rank() <= 0 || dim < 0 || dim > it->second.rank() - 1) {
+    return nullptr;
+  }
   SymbolDim* symbolDim = it->second.getSymbolDim(dim);
   assert(symbolDim != nullptr);
-
   symbolDim = getRootDim(symbolDim);
   it->second.setSymbolDim(dim, symbolDim);
-
   return symbolDim;
 }
 
@@ -681,19 +693,16 @@ DimValue ShapeAnalysis::getDimValue(SymbolDim* symbolDim) {
   if (rootDimValue != it->second) {
     dimSymbol2DimValue_[symbolDim] = rootDimValue;
   }
-
   return rootDimValue;
 }
 
 DimValue ShapeAnalysis::getDimValue(Value operand, int64_t dim) {
   auto ty = operand.getType().dyn_cast<ShapedType>();
-  if (!ty.hasRank() || dim >= ty.getRank()) {
+  if (!ty.hasRank() || ty.getRank() <= 0 || dim >= ty.getRank() || dim < 0) {
     return DimValue(Value(nullptr));
   }
-
   auto symbolDim = getDim(operand, dim);
-  // Check static dim.
-  if (ty && !ty.isDynamicDim(dim)) {
+  if (ty  && !ty.isDynamicDim(dim)) {
     auto dimVal = DimValue(ty.getDimSize(dim));
     // Update symble2dimval mapping.
     if (symbolDim != nullptr) {
@@ -791,10 +800,11 @@ LogicalResult ShapeAnalysis::mapDimValueEqual(DimValue lhs, DimValue rhs) {
 }
 
 bool ShapeAnalysis::isDimEqual(Value lhs, int64_t lhsDim, Value rhs,
-                               int64_t rhsDim) {
+                               int64_t rhsDim) {             
   auto lhs_ty = lhs.getType().dyn_cast<ShapedType>();
   auto rhs_ty = rhs.getType().dyn_cast<ShapedType>();
   if (!lhs_ty.hasRank() || !rhs_ty.hasRank()) {
+
     return false;
   }
   if (lhsDim >= lhs_ty.getRank() || rhsDim >= rhs_ty.getRank()) {
@@ -806,7 +816,6 @@ bool ShapeAnalysis::isDimEqual(Value lhs, int64_t lhsDim, Value rhs,
       !rhs_ty.isDynamicDim(rhsDim)) {
     return lhs_ty.getDimSize(lhsDim) == rhs_ty.getDimSize(rhsDim);
   }
-
   return (getDim(lhs, lhsDim) == getDim(rhs, rhsDim)) ||
          (getDimValue(lhs, lhsDim) == getDimValue(rhs, rhsDim));
 }

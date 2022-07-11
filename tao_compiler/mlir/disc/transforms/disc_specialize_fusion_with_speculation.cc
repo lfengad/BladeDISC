@@ -503,6 +503,8 @@ struct DiscSpecializeFusionWithSpeculationPass
     OpBuilder b(fusion_op);
     Location loc = fusion_op.getLoc();
     FusionOp cloned = dyn_cast<FusionOp>(b.clone(*fusion_op.getOperation()));
+    FusionOp cloned1 = dyn_cast<FusionOp>(b.clone(*fusion_op.getOperation()));
+    FusionOp cloned2 = dyn_cast<FusionOp>(b.clone(*fusion_op.getOperation()));
 
     Value operand = reduce_op->getOperand(0);
     Value row_size = b.create<memref::DimOp>(loc, operand, 0);
@@ -510,7 +512,6 @@ struct DiscSpecializeFusionWithSpeculationPass
     Value matrix_size = b.create<arith::MulIOp>(loc, row_size, col_size);
 
     if (use_new) {
-
       int thread_per_block = 512;
       Value cur_threads = b.create<arith::ConstantIndexOp>(loc, thread_per_block);
       Value cur_blocks =
@@ -524,19 +525,38 @@ struct DiscSpecializeFusionWithSpeculationPass
       // } else {
       //   sm_num = 100;  // Default is the data of MI210.
       // }
+    bool need_vec2 = false; 
+    for (Operation& op : fusion_op.region().front()) {
+      for (Value operand : op.getOperands()) {
+        auto ty = operand.getType().dyn_cast<MemRefType>().getElementType();
+        if (ty.isF32()) {
+          need_vec2 = true;
+        } else {
+          need_vec2 = false;
+        }
+        break;
+      }
+      break;
+    }
 
-      Value ref_blocks = b.create<arith::ConstantIndexOp>(loc,  core_count_<=0?100: core_count_);
-      Value large_reduce_threshold = b.create<arith::ConstantIndexOp>(loc, 64*32);
+      VLOG(0) << "Need Vectorize " << need_vec2;
+      Value block_limit = b.create<arith::ConstantIndexOp>(loc,  core_count_ <= 0?128: core_count_);
 
-      Value pred = b.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sge,
-                                          col_size, large_reduce_threshold);
-
-      auto if_op = b.create<scf::IfOp>(loc, llvm::None, pred, true);
+      Value vec2_threshold = b.create<arith::ConstantIndexOp>(loc, 512);
+      Value large_threshold = b.create<arith::ConstantIndexOp>(loc, 128);
+      Value medium_threshold = b.create<arith::ConstantIndexOp>(loc, 64);
+      Value var2 = b.create<arith::ConstantIndexOp>(loc, 2);
+      Value var0 = b.create<arith::ConstantIndexOp>(loc, 0);
 
       auto w64_h8_schedule =
           b.getIntegerAttr(b.getIntegerType(32), DISC_TILE_LOOP_W64_H8);
+      auto w64_h8_vec2_schedule =
+          b.getIntegerAttr(b.getIntegerType(32), DISC_TILE_LOOP_VEC2_W64_H8);
+      auto w32_h16_schedule =
+          b.getIntegerAttr(b.getIntegerType(32), DISC_TILE_LOOP_W32_H16);
       auto w16_h32_schedule =
           b.getIntegerAttr(b.getIntegerType(32), DISC_TILE_LOOP_W16_H32);
+
       auto num_thread_512_attr = b.getIntegerAttr(b.getIntegerType(32), 512);
       fusion_op->setAttr(kThreadPerBlockHint, num_thread_512_attr);
       fusion_op->setAttr(kColReductionScheduleHint, w64_h8_schedule);
@@ -546,11 +566,55 @@ struct DiscSpecializeFusionWithSpeculationPass
       cloned->setAttr(kColReductionScheduleHint, w16_h32_schedule);
       // one 8*16 tile if block# < SM#
       addFusionTag(b, cloned, "loop16w32h");
+      cloned1->setAttr(kThreadPerBlockHint, num_thread_512_attr);
+      cloned1->setAttr(kColReductionScheduleHint, w32_h16_schedule);
+      // one 8*16 tile if block# < SM#
+      addFusionTag(b, cloned1, "loop32w16h");
+      cloned2->setAttr(kThreadPerBlockHint, num_thread_512_attr);
+      cloned2->setAttr(kColReductionScheduleHint, w64_h8_vec2_schedule);
+      // one 8*16 tile if block# < SM#
+      addFusionTag(b, cloned2, "loop64w8h2v");
+      
 
-      Block* then_block = &if_op.getThenRegion().getBlocks().front();
-      Block* else_block = &if_op.getElseRegion().getBlocks().front();
-      fusion_op.getOperation()->moveBefore(then_block, then_block->begin());
+      Value pred = b.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sge,
+                                          col_size, large_threshold);
+
+      auto if_large_op = b.create<scf::IfOp>(loc, llvm::None, pred, true);
+
+      if (need_vec2) {
+        if_large_op.getThenRegion().front().clear();
+        b.setInsertionPointToEnd(&if_large_op.getThenRegion().front());
+        Value larger = b.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sge,
+                                          col_size, vec2_threshold);
+        Value rem2 = b.create<arith::RemUIOp>(loc, col_size, var2);
+        Value even = b.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
+                                          rem2, var0);
+        Value pred_vec2 = b.create<arith::AndIOp>(loc, larger, even);
+                          
+        auto if_vec2_op = b.create<scf::IfOp>(loc, llvm::None, pred_vec2, true);
+        Block* then_block = &if_vec2_op.getThenRegion().getBlocks().front();
+        Block* else_block = &if_vec2_op.getElseRegion().getBlocks().front();
+        cloned2.getOperation()->moveBefore(then_block, then_block->begin());
+        fusion_op.getOperation()->moveBefore(else_block, else_block->begin());
+        b.create<scf::YieldOp>(loc, ValueRange{});
+      } else {
+        Block* then_block = &if_large_op.getThenRegion().getBlocks().front();
+        fusion_op.getOperation()->moveBefore(then_block, then_block->begin());
+      }
+      if_large_op.getElseRegion().front().clear();
+      b.setInsertionPointToEnd(&if_large_op.getElseRegion().front());
+      Value pred_medium = b.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sge,
+                                          col_size, medium_threshold);
+      auto if_medium_op = b.create<scf::IfOp>(loc, llvm::None, pred_medium, true);
+      Block* then_block = &if_medium_op.getThenRegion().getBlocks().front();
+      Block* else_block = &if_medium_op.getElseRegion().getBlocks().front();
+      cloned1.getOperation()->moveBefore(then_block, then_block->begin());
       cloned.getOperation()->moveBefore(else_block, else_block->begin());
+      b.create<scf::YieldOp>(loc, ValueRange{});
+      // Block* then_block = &if_op.getThenRegion().getBlocks().front();
+      // Block* else_block = &if_op.getElseRegion().getBlocks().front();
+      // fusion_op.getOperation()->moveBefore(then_block, then_block->begin());
+      // cloned.getOperation()->moveBefore(else_block, else_block->begin());
     } else {
       int thread_per_block = 256;
       Value cur_threads = b.create<arith::ConstantIndexOp>(loc, thread_per_block);

@@ -81,8 +81,9 @@ using DiscColReductionScheduleType = enum : int {
   DISC_TILE_W8_H16 = 2,
   DISC_TILE_W8_H8 = 3,
   DISC_TILE_LOOP_W64_H8 = 4,
-  DISC_TILE_LOOP_W16_H32 = 5,
-  DISC_TILE_LOOP_W8_H8 = 6,
+  DISC_TILE_LOOP_W32_H16 = 5,
+  DISC_TILE_LOOP_W16_H32 = 6,
+  DISC_TILE_LOOP_VEC2_W64_H8 = 7
 };
 
 // number of therads per block when doing codegen on GPU.
